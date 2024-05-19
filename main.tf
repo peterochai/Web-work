@@ -203,4 +203,134 @@ resource "azurerm_lb" "web_lb" {
 # Create Public IP for Application Gateway
 resource "azurerm_public_ip" "appgw_public_ip" {
   name                = "appgw-public-ip"
-  location            = azurerm_resource
+  location            = azurerm_resource_group.ASSET.location
+  resource_group_name = azurerm_resource_group.ASSET.name
+  allocation_method   = "Static"
+  sku                 = "Standard"
+}
+
+# Create Backend Pool for Application Gateway
+resource "azurerm_application_gateway_backend_address_pool" "web_backend_pool" {
+  name                = "web-backend-pool"
+  resource_group_name = azurerm_resource_group.ASSET.name
+  location            = azurerm_resource_group.ASSET.location
+  backend_addresses   = [azurerm_windows_virtual_machine.web_vms.*.network_interface.*.private_ip_address]
+}
+
+# Create HTTP Settings for Application Gateway
+resource "azurerm_application_gateway_http_settings" "http_settings" {
+  name                      = "http-settings"
+  resource_group_name       = azurerm_resource_group.ASSET.name
+  location                  = azurerm_resource_group.ASSET.location
+  cookie_based_affinity     = "Disabled"
+  port                      = 80
+  protocol                  = "Http"
+  request_timeout           = 20
+}
+
+# Create Listener for Application Gateway
+resource "azurerm_application_gateway_listener" "http_listener" {
+  name                                = "http-listener"
+  resource_group_name                 = azurerm_resource_group.ASSET.name
+  location                            = azurerm_resource_group.ASSET.location
+  frontend_ip_configuration_name      = azurerm_application_gateway_frontend_ip_configuration.appgw_frontend_ip.name
+  frontend_port_name                  = "http-port"
+  protocol                            = "Http"
+}
+
+# Create Routing Rule for Application Gateway
+resource "azurerm_application_gateway_url_path_map" "url_path_map" {
+  name                     = "url-path-map"
+  resource_group_name      = azurerm_resource_group.ASSET.name
+  location                 = azurerm_resource_group.ASSET.location
+  default_backend_address_pool_id = azurerm_application_gateway_backend_address_pool.web_backend_pool.id
+  default_backend_http_settings_id = azurerm_application_gateway_http_settings.http_settings.id
+  default_redirect_configuration {
+    redirect_type = "Permanent"
+    target_url = "https://www.example.com"
+  }
+}
+
+# Associate URL Path Map with Listener
+resource "azurerm_application_gateway_url_path_map" "path_map_association" {
+  name                     = "path-map-association"
+  resource_group_name      = azurerm_resource_group.ASSET.name
+  location                 = azurerm_resource_group.ASSET.location
+  gateway_id               = azurerm_application_gateway.appgw.id
+  default_backend_address_pool_id = azurerm_application_gateway_backend_address_pool.web_backend_pool.id
+  default_backend_http_settings_id = azurerm_application_gateway_http_settings.http_settings.id
+  default_redirect_configuration {
+    redirect_type = "Permanent"
+    target_url = "https://www.example.com"
+  }
+}
+
+# Create Frontend IP Configuration for Application Gateway
+resource "azurerm_application_gateway_frontend_ip_configuration" "appgw_frontend_ip" {
+  name                                = "appgw-frontend-ip"
+  resource_group_name                 = azurerm_resource_group.ASSET.name
+  location                            = azurerm_resource_group.ASSET.location
+  public_ip_address_id                = azurerm_public_ip.appgw_public_ip.id
+  private_ip_address_allocation       = "Dynamic"
+  subnet_id                           = azurerm_subnet.web_subnet.id
+}
+
+# Create Azure Application Gateway
+resource "azurerm_application_gateway" "appgw" {
+  name                                = "app-gateway"
+  resource_group_name                 = azurerm_resource_group.ASSET.name
+  location                            = azurerm_resource_group.ASSET.location
+  sku                                 = "Standard_v2"
+  gateway_ip_configuration {
+    name                              = "appgw-frontend-ip-config"
+    subnet_id                         = azurerm_subnet.web_subnet.id
+  }
+  frontend_port {
+    name                              = "http-port"
+    port                              = 80
+  }
+  frontend_ip_configuration {
+    name                              = "appgw-frontend-ip"
+    public_ip_address_id              = azurerm_public_ip.appgw_public_ip.id
+  }
+  backend_address_pool {
+    name                              = "web-backend-pool"
+    backend_addresses                 = azurerm_windows_virtual_machine.web_vms.*.network_interface.*.private_ip_address
+  }
+  backend_http_settings {
+    name                              = "http-settings"
+    cookie_based_affinity             = "Disabled"
+    port                              = 80
+    protocol                          = "Http"
+    request_timeout                   = 20
+  }
+  http_settings {
+    name                              = "http-settings"
+    cookie_based_affinity             = "Disabled"
+    port                              = 80
+    protocol                          = "Http"
+    request_timeout                   = 20
+  }
+  gateway_ip_configuration {
+    name                              = "appgw-frontend-ip-config"
+    subnet_id                         = azurerm_subnet.web_subnet.id
+  }
+  frontend_ip_configuration {
+    name                              = "appgw-frontend-ip"
+    public_ip_address_id              = azurerm_public_ip.appgw_public_ip.id
+  }
+  url_path_map {
+    name                              = "url-path-map"
+    default_backend_address_pool_id   = azurerm_application_gateway_backend_address_pool.web_backend_pool.id
+    default_backend_http_settings_id  = azurerm_application_gateway_http_settings.http_settings.id
+    default_redirect_configuration {
+      redirect_type                   = "Permanent"
+      target_url                      = "https://www.example.com"
+    }
+  }
+  ssl_certificate {
+    name                              = "appgw-ssl-cert"
+    data                              = "base64encodedcertificatedata"
+    password                          = "certpassword"
+  }
+}
