@@ -108,7 +108,7 @@ resource "azurerm_availability_set" "web_availability_set" {
 }
 
 ## Create Windows Server 2019 VMs for the web tier
- resource "azurerm_windows_virtual_machine" "web_vms" 
+resource "azurerm_windows_virtual_machine" "web_vms" {
  {
   count                = 2
   name                 = "web-vm-${count.index + 1}"
@@ -116,7 +116,7 @@ resource "azurerm_availability_set" "web_availability_set" {
   location             = azurerm_resource_group.ASSET.location
   size                 = "Standard_D2s_v3"
   admin_username       = "Azureuser"
-  admin_password       = "yhere"
+  admin_password       = "YourP@ssword123"
   availability_set_id  = azurerm_availability_set.web_availability_set.id
   delete_os_disk_on_termination = true
 
@@ -141,6 +141,7 @@ resource "azurerm_availability_set" "web_availability_set" {
       name                          = "internal"
       subnet_id                     = azurerm_subnet.web_subnet.id  
       private_ip_address_allocation = "Dynamic"
+    }
     }
   }
 }
@@ -333,4 +334,181 @@ resource "azurerm_application_gateway" "appgw" {
     data                              = "base64encodedcertificatedata"
     password                          = "certpassword"
   }
+}
+
+
+
+# Create SQL Server
+resource "azurerm_sql_server" "main" {
+  name                         = "my-sql-server"
+  resource_group_name          = azurerm_resource_group.ASSET.name
+  location                     = azurerm_resource_group.ASSET.location
+  version                      = "12.0"
+  administrator_login          = "sqladmin"
+  administrator_login_password = "H@Sh1CoR3!"
+}
+
+# Create SQL Database
+resource "azurerm_sql_database" "main" {
+  name                = "my-sql-database"
+  resource_group_name = azurerm_resource_group.ASSET.name
+  location            = azurerm_resource_group.ASSET.location
+  server_name         = azurerm_sql_server.main.name
+  edition             = "Standard"
+  requested_service_objective_name = "S0"
+}
+
+# Create Firewall Rule to allow Azure services to access the server
+resource "azurerm_sql_firewall_rule" "allow_azure_services" {
+  name                = "allow-azure-services"
+  resource_group_name = azurerm_resource_group.ASSET.name
+  server_name         = azurerm_sql_server.main.name
+  start_ip_address    = "0.0.0.0"
+  end_ip_address      = "0.0.0.0"
+}
+
+# Backup configuration for Virtual Machines
+resource "azurerm_backup_policy_vm" "daily" {
+  name                = "daily-backup-policy"
+  resource_group_name = azurerm_resource_group.ASSET.name
+  location            = azurerm_resource_group.ASSET.location
+
+  retention_daily {
+    count = 7
+  }
+
+  schedule {
+    time_zone = "UTC"
+    daily {
+      hour = 2
+      minute = 0
+    }
+  }
+}
+
+# Backup configuration for SQL Database
+resource "azurerm_backup_protected_item" "sql_backup" {
+  resource_group_name       = azurerm_resource_group.ASSET.name
+  vault_name                = azurerm_backup_vault.main.name
+  backup_policy_id          = azurerm_backup_policy_sql.daily.id
+  source_data_source_id     = azurerm_sql_database.main.id
+}
+
+# Backup Vault
+resource "azurerm_backup_vault" "main" {
+  name                = "my-backup-vault"
+  resource_group_name = azurerm_resource_group.ASSET.name
+  location            = azurerm_resource_group.ASSET.location
+  sku                 = "Standard"
+}
+
+# Security Center configuration
+resource "azurerm_security_center_subscription_pricing" "standard" {
+  tier          = "Standard"
+  resource_type = "VirtualMachines"
+}
+
+resource "azurerm_security_center_subscription_pricing" "sql" {
+  tier          = "Standard"
+  resource_type = "SqlServers"
+}
+
+# Create Availability Set for Web tier VMs
+resource "azurerm_availability_set" "web_availability_set" {
+  name                         = "web-tier-availability-set"
+  resource_group_name          = azurerm_resource_group.ASSET.name
+  location                     = azurerm_resource_group.ASSET.location
+  managed                      = true
+}
+
+## Create Windows Server 2019 VMs for the web tier
+resource "azurerm_windows_virtual_machine" "web_vms" {
+  count                = 2
+  name                 = "web-vm-${count.index + 1}"
+  resource_group_name  = azurerm_resource_group.ASSET.name
+  location             = azurerm_resource_group.ASSET.location
+  size                 = "Standard_D2s_v3"
+  admin_username       = "Azureuser"
+  admin_password       = "yhere"
+  availability_set_id  = azurerm_availability_set.web_availability_set.id
+  delete_os_disk_on_termination = true
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Premium_LRS"
+    disk_size_gb         = 128
+  }
+
+  source_image_reference {
+    publisher = "MicrosoftWindowsServer"
+    offer     = "WindowsServer"
+    sku       = "2019-Datacenter"
+    version   = "latest"
+  }
+
+  network_interface {
+    name    = "web-nic-${count.index + 1}"
+    primary = true
+
+    ip_configuration {
+      name                          = "internal"
+      subnet_id                     = azurerm_subnet.web_subnet.id  
+      private_ip_address_allocation = "Dynamic"
+    }
+  }
+}
+
+# Create Public IP for the Load Balancer
+resource "azurerm_public_ip" "lb_public_ip" {
+  name                = "web-lb-public-ip"
+  location            = azurerm_resource_group.ASSET.location
+  resource_group_name = azurerm_resource_group.ASSET.name
+  allocation_method   = "Static"
+  sku                 = "Standard"
+}
+
+# Create Backend Pool for Load Balancer
+resource "azurerm_lb_backend_address_pool" "web_backend_pool" {
+  name                = "web-backend-pool"
+  resource_group_name = azurerm_resource_group.ASSET.name
+  loadbalancer_id     = azurerm_lb.web_lb.id
+}
+
+# Create Health Probe for Load Balancer
+resource "azurerm_lb_probe" "http_probe" {
+  name                = "http-probe"
+  resource_group_name = azurerm_resource_group.ASSET.name
+  loadbalancer_id     = azurerm_lb.web_lb.id
+  protocol            = "Http"
+  port                = 80
+  request_path        = "/"
+}
+
+# Create Load Balancing Rule for Load Balancer
+resource "azurerm_lb_rule" "http_rule" {
+  name                     = "http-rule"
+  resource_group_name      = azurerm_resource_group.ASSET.name
+  loadbalancer_id          = azurerm_lb.web_lb.id
+  frontend_ip_configuration_id = azurerm_lb_frontend_ip_configuration.web_frontend_ip.id
+  backend_address_pool_id      = azurerm_lb_backend_address_pool.web_backend_pool.id
+  probe_id                     = azurerm_lb_probe.http_probe.id
+  protocol                     = "Tcp"
+  frontend_port                = 80
+  backend_port                 = 80
+}
+
+# Create Frontend IP Configuration for Load Balancer
+resource "azurerm_lb_frontend_ip_configuration" "web_frontend_ip" {
+  name                     = "web-frontend-ip"
+  resource_group_name      = azurerm_resource_group.ASSET.name
+  loadbalancer_id          = azurerm_lb.web_lb.id
+  public_ip_address_id     = azurerm_public_ip.lb_public_ip.id
+}
+
+# Create Azure Load Balancer
+resource "azurerm_lb" "web_lb" {
+  name                = "web-lb"
+  resource_group_name = azurerm_resource_group.ASSET.name
+  location            = azurerm_resource_group.ASSET.location
+  sku                 = "Standard"
 }

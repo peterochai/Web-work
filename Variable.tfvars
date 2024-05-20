@@ -1,2 +1,5 @@
-resource_group_location = "East US"
-prefix                  = "myweb"
+resource_group_name = "vnet-resource-group"
+location            = "East US"
+admin_username      = "Azureuser"
+admin_password      = "YourP@ssword123"
+sql_admin_password  = "YourSQLP@ssword123"
